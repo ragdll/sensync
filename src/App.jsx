@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Calculator, RefreshCw, Plus, Search, Trash2, X, AlertCircle, Globe } from 'lucide-react';
+import { createClient } from '@supabase/supabase-js';
 
 // Google Fontsのインポート
 const fontStyle = `
@@ -12,6 +13,17 @@ if (typeof document !== 'undefined') {
   styleElement.textContent = fontStyle;
   document.head.appendChild(styleElement);
 }
+
+// ========================================
+// Supabase クライアント初期化
+// ========================================
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+// Supabaseクライアント（環境変数が設定されている場合のみ初期化）
+const supabase = supabaseUrl && supabaseAnonKey
+  ? createClient(supabaseUrl, supabaseAnonKey)
+  : null;
 
 // ========================================
 // 多言語対応テキスト
@@ -76,7 +88,16 @@ const translations = {
       gameNameLength: 'ゲーム名は{max}文字以内で入力してください',
       fovRequired: 'FOVは数値で入力してください',
       fovRange: 'FOVは{min}〜{max}の範囲で入力してください'
-    }
+    },
+    proSettings: 'プロゲーマーの設定',
+    proSettingsDesc: 'FPS初心者の方は、プロゲーマーの設定を参考にしてみましょう',
+    selectGameToViewPros: 'ゲームを選択してプロの設定を表示',
+    player: 'プレイヤー',
+    dpi: 'DPI',
+    sensitivity: '感度',
+    video: '動画',
+    noProsAvailable: 'このゲームのプロ設定は現在登録されていません',
+    loading: '読み込み中...'
   },
   en: {
     title: 'SenSync',
@@ -137,7 +158,16 @@ const translations = {
       gameNameLength: 'Game name must be within {max} characters',
       fovRequired: 'FOV must be a number',
       fovRange: 'FOV must be between {min} and {max}'
-    }
+    },
+    proSettings: 'Pro Player Settings',
+    proSettingsDesc: 'Beginners can reference pro player settings as a starting point',
+    selectGameToViewPros: 'Select a game to view pro settings',
+    player: 'Player',
+    dpi: 'DPI',
+    sensitivity: 'Sensitivity',
+    video: 'Video',
+    noProsAvailable: 'No pro settings registered for this game yet',
+    loading: 'Loading...'
   }
 };
 
@@ -231,6 +261,76 @@ const defaultGames = {
   cod: { name: 'Call of Duty', yaw: 0.0066, custom: false },
   pubg: { name: 'PUBG', yaw: 0.0066, custom: false },
   rainbow6: { name: 'Rainbow Six Siege', yaw: 0.00572958, custom: false }
+};
+
+// ========================================
+// プロプレイヤー設定データ取得関数
+// ========================================
+const fetchProPlayerSettings = async () => {
+  // Supabaseが利用できない場合は空のオブジェクトを返す
+  if (!supabase) {
+    console.warn('Supabase is not configured. Pro player settings will not be available.');
+    return {};
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('pro_players')
+      .select('*')
+      .order('player_name', { ascending: true });
+
+    if (error) throw error;
+
+    // デバッグ：取得したデータを確認
+    console.log('Supabaseから取得したデータ:', data);
+    console.log('データ件数:', data.length);
+
+    // データをgame_idごとにグループ化
+    const groupedData = {};
+    data.forEach(player => {
+      if (!groupedData[player.game_id]) {
+        groupedData[player.game_id] = [];
+      }
+      groupedData[player.game_id].push({
+        name: player.player_name,
+        dpi: player.dpi,
+        sens: player.sensitivity,
+        edpi: player.edpi,
+        youtubeUrl: player.youtube_url
+      });
+    });
+
+    console.log('グループ化されたデータ:', groupedData);
+    return groupedData;
+  } catch (error) {
+    console.error('Error fetching pro player settings:', error);
+    return {};
+  }
+};
+
+// ========================================
+// YouTube URL処理ヘルパー関数
+// ========================================
+const getYouTubeVideoId = (url) => {
+  if (!url) return null;
+
+  // 既にIDだけの場合（11文字）
+  if (url.length === 11 && !url.includes('/') && !url.includes('?')) {
+    return url;
+  }
+
+  // フルURLからIDを抽出
+  const patterns = [
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/,
+    /youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match) return match[1];
+  }
+
+  return null;
 };
 
 // ========================================
@@ -483,12 +583,123 @@ const ResultCard = ({ title, value, unit, description }) => {
 };
 
 // ========================================
+// プロプレイヤー設定表示コンポーネント
+// ========================================
+const ProPlayerSettings = ({ selectedGame, lang, proSettings, isLoading }) => {
+  const t = translations[lang];
+  const gamePros = proSettings[selectedGame] || [];
+
+  if (isLoading) {
+    return (
+      <div className={`${theme.card.base} backdrop-blur-lg rounded-2xl p-8 border`}>
+        <h3 className={`${theme.text.primary} text-2xl font-bold mb-4`}>
+          🎮 {t.proSettings}
+        </h3>
+        <p className={`${theme.text.secondary} text-center py-8`}>
+          {t.loading}
+        </p>
+      </div>
+    );
+  }
+
+  if (gamePros.length === 0) {
+    return (
+      <div className={`${theme.card.base} backdrop-blur-lg rounded-2xl p-8 border`}>
+        <h3 className={`${theme.text.primary} text-2xl font-bold mb-4`}>
+          🎮 {t.proSettings}
+        </h3>
+        <p className={`${theme.text.secondary} text-center py-8`}>
+          {t.noProsAvailable}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`${theme.card.base} backdrop-blur-lg rounded-2xl p-8 border`}>
+      <h3 className={`${theme.text.primary} text-2xl font-bold mb-2`}>
+        🎮 {t.proSettings}
+      </h3>
+      <p className={`${theme.text.secondary} text-sm mb-6`}>
+        {t.proSettingsDesc}
+      </p>
+
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead>
+            <tr className={`border-b ${theme.border}`}>
+              <th className={`${theme.text.primary} text-left py-3 px-4 font-semibold`}>
+                {t.player}
+              </th>
+              <th className={`${theme.text.primary} text-right py-3 px-4 font-semibold`}>
+                {t.dpi}
+              </th>
+              <th className={`${theme.text.primary} text-right py-3 px-4 font-semibold`}>
+                {t.sensitivity}
+              </th>
+              <th className={`${theme.text.primary} text-right py-3 px-4 font-semibold`}>
+                {t.edpi}
+              </th>
+              <th className={`${theme.text.primary} text-center py-3 px-4 font-semibold`}>
+                {t.video}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {gamePros.map((pro, index) => {
+              const videoId = getYouTubeVideoId(pro.youtubeUrl);
+              return (
+                <tr
+                  key={index}
+                  className={`border-b ${theme.border} hover:${theme.card.secondary} transition-colors`}
+                >
+                  <td className={`${theme.text.primary} py-3 px-4 font-medium`}>
+                    {pro.name}
+                  </td>
+                  <td className={`${theme.text.secondary} text-right py-3 px-4`}>
+                    {pro.dpi}
+                  </td>
+                  <td className={`${theme.text.secondary} text-right py-3 px-4`}>
+                    {pro.sens}
+                  </td>
+                  <td className={`${theme.text.primary} text-right py-3 px-4 font-semibold`}>
+                    {pro.edpi}
+                  </td>
+                  <td className={`py-3 px-4`}>
+                    {videoId ? (
+                      <div className="flex justify-center">
+                        <iframe
+                          width="280"
+                          height="158"
+                          src={`https://www.youtube.com/embed/${videoId}`}
+                          title={`${pro.name} gameplay`}
+                          frameBorder="0"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                          allowFullScreen
+                          className="rounded-lg"
+                        ></iframe>
+                      </div>
+                    ) : (
+                      <span className={`${theme.text.muted} text-sm`}>-</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+// ========================================
 // メインコンポーネント
 // ========================================
 const FPSSensitivityCalculator = () => {
   const [lang, setLang] = useState('ja');
   const t = translations[lang];
-  
+
   const [games, setGames] = useState(defaultGames);
   const [dpi, setDpi] = useState(800);
   const [sourceGame, setSourceGame] = useState('valorant');
@@ -501,7 +712,11 @@ const FPSSensitivityCalculator = () => {
   const [convertedSens, setConvertedSens] = useState(0);
   const [fovAdjustedSens, setFovAdjustedSens] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  
+
+  // プロプレイヤー設定の状態管理
+  const [proPlayerSettings, setProPlayerSettings] = useState({});
+  const [isLoadingProSettings, setIsLoadingProSettings] = useState(true);
+
   const [errors, setErrors] = useState({
     dpi: '',
     sourceSens: '',
@@ -513,10 +728,22 @@ const FPSSensitivityCalculator = () => {
   const validateSensitivity = createValidator(SECURITY_LIMITS.SENSITIVITY_MIN, SECURITY_LIMITS.SENSITIVITY_MAX, 'sens', lang, t);
   const validateFOV = createValidator(SECURITY_LIMITS.FOV_MIN, SECURITY_LIMITS.FOV_MAX, 'fov', lang, t);
 
+  // プロプレイヤー設定をSupabaseから取得
+  useEffect(() => {
+    const loadProSettings = async () => {
+      setIsLoadingProSettings(true);
+      const settings = await fetchProPlayerSettings();
+      setProPlayerSettings(settings);
+      setIsLoadingProSettings(false);
+    };
+
+    loadProSettings();
+  }, []);
+
   useEffect(() => {
     const dpiValidation = validateDPI(dpi);
     const sensValidation = validateSensitivity(sourceSens);
-    
+
     if (dpiValidation.valid && sensValidation.valid) {
       calculateAll();
     }
@@ -797,6 +1024,16 @@ const FPSSensitivityCalculator = () => {
               <li key={index}>• {item}</li>
             ))}
           </ul>
+        </div>
+
+        {/* プロプレイヤー設定 */}
+        <div className="mt-8">
+          <ProPlayerSettings
+            selectedGame={sourceGame}
+            lang={lang}
+            proSettings={proPlayerSettings}
+            isLoading={isLoadingProSettings}
+          />
         </div>
       </div>
 
